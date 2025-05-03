@@ -44,7 +44,7 @@ def get_database_name(passkey):
         for row in reader:
             if row and row[0] == passkey:
                 db_name = row[1]
-                connection = mysql.connector.connect(host="localhost", user="root", password="yourpassword", database=db_name)
+                connection = mysql.connector.connect(host="localhost", user="root", password="password", database=db_name)
                 return db_name, connection
     return None, None
 
@@ -60,7 +60,7 @@ def create_new_database():
         writer.writerow([passkey, db_name, DEFAULT_ADMIN_PASS])
     
     # Create SQL database and tables
-    connection = mysql.connector.connect(host="localhost", user="root", password="yourpassword")
+    connection = mysql.connector.connect(host="localhost", user="root", password="password")
     cursor = connection.cursor()
     cursor.execute(f"CREATE DATABASE {db_name}")
     cursor.execute(f"USE {db_name}")
@@ -72,13 +72,13 @@ def create_new_database():
             name VARCHAR(255) NOT NULL,
             email VARCHAR(255) UNIQUE NOT NULL,
             password VARCHAR(255) NOT NULL,
-            lend_status ENUM('accepted', NULL) DEFAULT NULL,
+            lend_status ENUM('accepted') DEFAULT NULL,
             lended_item VARCHAR(255) DEFAULT NULL,
-            borrow_status ENUM('requested', 'received', NULL) DEFAULT NULL,
+            borrow_status ENUM('requested', 'received') DEFAULT NULL,
             borrowed_item VARCHAR(255) DEFAULT NULL,
             date_start DATE DEFAULT NULL,
             date_end DATE DEFAULT NULL
-        )
+        );
     """)
     
     # Create admin table
@@ -100,12 +100,16 @@ def create_new_database():
     transactions_file = f"transactions{db_number}.txt"  # Changed to .txt
     lended_items_file = f"lended_items{db_number}.csv"
     
-    for filename in [borrow_file, lended_items_file]:
+    borrow_columns = ["Borrow ID", "Item", "From Date", "To Date", "User ID"]
+    lended_items_columns = ["Borrow ID", "Item", "From Date", "To Date", "Borrower ID", "Lender ID"]
+
+    # Create files if they don't exist
+    for filename, columns in [(borrow_file, borrow_columns), (lended_items_file, lended_items_columns)]:
         if not os.path.exists(filename):
             with open(filename, "w", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerow(["Borrow ID", "Item", "From Date", "To Date", "User ID"])
-    
+                writer.writerow(columns)
+                
     # Create an empty transaction log file
     if not os.path.exists(transactions_file):
         with open(transactions_file, "w") as file:

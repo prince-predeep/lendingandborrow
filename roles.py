@@ -3,17 +3,20 @@ import hashlib
 import csv
 import datetime
 from setup import get_database_name
+from rich.console import Console
+from rich.prompt import Prompt
+from rich.text import Text
+from rich.table import Table
+import getpass
 
+console = Console()
 PASSKEY_FILE = "passkeys.csv"
-
-import datetime
 
 def log_transaction(db_name, user_id, action, item_name, target_user_id=None):
     db_number = db_name.replace("lendborrow", "")  
     transactions_file = f"transactions{db_number}.txt"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")  
 
-    # Create log message based on action
     if action == "Accepted":
         log_entry = f"[{timestamp}] User {user_id} accepted '{item_name}' request from User {target_user_id}\n"
     elif action == "Lent":
@@ -25,30 +28,32 @@ def log_transaction(db_name, user_id, action, item_name, target_user_id=None):
     else:
         log_entry = f"[{timestamp}] User {user_id} {action.lower()} '{item_name}'\n"
 
-    # Append to transaction history file
     try:
         with open(transactions_file, "a") as file:
             file.write(log_entry)
     except Exception as e:
-        print(f"Error writing to transaction log: {e}")
+        console.print(f"[red]Error writing to transaction log: {e}[/red]")
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def user_registration(connection):
-    name = input("Enter your name: ")
-    email = input("Enter your email: ")
+    name = Prompt.ask("[cyan]Enter your name[/cyan]")
+    email = Prompt.ask("[cyan]Enter your email[/cyan]")
     password = input("Enter your password: ")
     hashed_password = hash_password(password)
 
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO user (name, email, password) VALUES (%s, %s, %s)", (name, email, hashed_password))
-    connection.commit()
-    cursor.close()
-    print("User registered successfully!")
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO user (name, email, password) VALUES (%s, %s, %s)", (name, email, hashed_password))
+        connection.commit()
+        cursor.close()
+        console.print("[green]User registered successfully![/green]")
+    except mysql.connector.Error as e:
+        console.print(f"[red]Error during registration: {e}[/red]")
 
 def user_login(connection):
-    email = input("Enter your email: ")
+    email = Prompt.ask("[cyan]Enter your email[/cyan]")
     password = input("Enter your password: ")
     hashed_password = hash_password(password)
 
@@ -59,33 +64,45 @@ def user_login(connection):
         cursor.close()
 
         if user:
-            user_id = user[0]  # Extract user_id
-            print(f"Login successful! Your User ID is: {user_id}")
-            return user_id  # Return user_id instead of just True
+            user_id = user[0]
+            console.print(f"[green]Login successful! Your User ID is: {user_id}[/green]")
+            return user_id
         else:
-            print("Invalid email or password!")
-            return None  # Return None if login fails
+            console.print("[red]Invalid email or password![/red]")
+            return None
 
     except mysql.connector.Error as e:
-        print(f"Error during login: {e}")
+        console.print(f"[red]Error during login: {e}[/red]")
         return None
 
-def admin_registration(connection):
-    name = input("Enter admin name: ")
-    email = input("Enter admin email: ")
-    password = input("Enter admin password: ")
+def admin_registration(db_name, connection):
+    with open(PASSKEY_FILE, "r", newline="") as file:
+        password = input("Enter current admin passkey : ")
+        reader = csv.reader(file)
+        for row in reader:
+            if row[1] == db_name:
+                if row[2] == password:
+                    console.print("[green]Access Granted[/green]")
+                else:
+                    console.print("[red]Password is incorrect[/red]")
+                    return
+    name = Prompt.ask("[cyan]Enter admin name[/cyan]")
+    email = Prompt.ask("[cyan]Enter admin email[/cyan]")
+    password = input("Enter current admin password: ")
     hashed_password = hash_password(password)
-    role = "admin"
 
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO admin (admin_name, email, password, role) VALUES (%s, %s, %s, %s)", (name, email, hashed_password, role))
-    connection.commit()
-    cursor.close()
-    print("Admin registered successfully!")
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO admin (admin_name, email, password) VALUES (%s, %s, %s)", (name, email, hashed_password))
+        connection.commit()
+        cursor.close()
+        console.print("[green]Admin registered successfully![/green]")
+    except mysql.connector.Error as e:
+        console.print(f"[red]Error during admin registration: {e}[/red]")
 
 def admin_login(connection):
-    email = input("Enter admin email: ")
-    password = input("Enter admin password: ")
+    email = Prompt.ask("[cyan]Enter admin email[/cyan]")
+    password = input("Enter current admin password: ")
     hashed_password = hash_password(password)
 
     cursor = connection.cursor()
@@ -94,61 +111,73 @@ def admin_login(connection):
     cursor.close()
 
     if admin:
-        print("Admin login successful!")
+        console.print("[green]Admin login successful![/green]")
         return True
     else:
-        print("Invalid email or password!")
+        console.print("[red]Invalid email or password![/red]")
         return False
-    
-def change_admin_passkey(db_name, connection):
-    old_passkey = input("Enter the current passkey: ")
 
-    # Read the passkey file and verify the old passkey
+def change_admin_passkey(db_name, connection):
+    old_passkey = input("Enter current passkey : ")
+
+
     rows = []
     passkey_found = False
 
     with open(PASSKEY_FILE, "r", newline="") as file:
         reader = csv.reader(file)
         for row in reader:
-            if row[1] == db_name:  # Match database name
-                if row[0] == old_passkey:  # Verify old passkey
+            if row[1] == db_name:
+                if row[2] == old_passkey:
                     passkey_found = True
-                    new_passkey = input("Enter new 4-letter passkey: ")
-                    row[0] = new_passkey  # Update passkey
+                    new_passkey = input("Enter new passkey : ")
+
+                    row[2] = new_passkey
                 else:
-                    print("Error: Incorrect passkey!")
-                    return  # Exit function on incorrect passkey
+                    console.print("[red]Error: Incorrect passkey![/red]")
+                    return
             rows.append(row)
 
     if not passkey_found:
-        print("Error: Passkey verification failed!")
+        console.print("[red]Error: Passkey verification failed![/red]")
         return
 
-    # Write updated data back to the CSV file
     with open(PASSKEY_FILE, "w", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(rows)
 
-    print("Admin passkey updated successfully!")
+    console.print("[green]Admin passkey updated successfully![/green]")
 
-def view_borrow_requests(db_name):
-    db_number = db_name.replace("lendborrow", "")  # Extract the number from db_name
+def view_borrow_requests(db_name, connection):
+    db_number = db_name.replace("lendborrow", "")  
     borrow_file = f"borrow{db_number}.csv"
     
     try:
         with open(borrow_file, "r", newline="") as file:
             reader = csv.reader(file)
             requests = list(reader)
-            
-            if not requests:
-                print("No borrow requests found.")
+
+            if not requests or len(requests) <= 1:  # If only header exists, no requests
+                console.print("[yellow]No borrow requests found.[/yellow]")
                 return
+
+            # Remove header before displaying
+            if requests[0][0].lower() == "borrow id":
+                requests = requests[1:]
+
+            table = Table(title="Borrow Requests", show_lines=True)
+            table.add_column("ID", justify="center", style="cyan")
+            table.add_column("Item", style="bold")
+            table.add_column("From Date", justify="center")
+            table.add_column("To Date", justify="center")
+            table.add_column("User ID", justify="center", style="magenta")
             
-            print("\nBorrow Requests:")
             for request in requests:
-                print(", ".join(request))
+                table.add_row(*request)
+            
+            console.print(table)
     except FileNotFoundError:
-        print("No borrow requests found.")
+        console.print("[yellow]No borrow requests found.[/yellow]")
 
 def delete_borrow_request(db_name, connection):
     db_number = db_name.replace("lendborrow", "")
@@ -159,31 +188,46 @@ def delete_borrow_request(db_name, connection):
             reader = csv.reader(file)
             requests = list(reader)
             
-            if not requests:
-                print("No borrow requests to delete.")
+            if len(requests) <= 1:  # Only header exists, no borrow requests
+                console.print("[yellow]No borrow requests to delete.[/yellow]")
                 return
             
-            print("\nBorrow Requests:")
-            for i, request in enumerate(requests, start=1):
-                print(f"{i}. {', '.join(request)}")
+            header = requests[0]  # Store header separately
+            borrow_requests = requests[1:]  # Exclude header from processing
             
-            borrow_id = int(input("Enter the Borrow ID to delete: "))
-            if borrow_id < 1 or borrow_id > len(requests):
-                print("Invalid Borrow ID.")
+            table = Table(title="Borrow Requests", show_lines=True)
+            table.add_column("Index", justify="center", style="cyan")
+            table.add_column("Item", style="bold")
+            table.add_column("From Date", justify="center")
+            table.add_column("To Date", justify="center")
+            table.add_column("User ID", justify="center", style="magenta")
+            
+            for i, request in enumerate(borrow_requests, start=1):
+                table.add_row(str(i), *request[1:])  
+            
+            console.print(table)
+            
+            borrow_id = Prompt.ask("[cyan]Enter the Borrow ID to delete[/cyan]", default="0")
+            borrow_id = int(borrow_id)
+            if borrow_id < 1 or borrow_id > len(borrow_requests):
+                console.print("[red]Invalid Borrow ID.[/red]")
                 return
             
-            user_id = requests[borrow_id - 1][-1]  # Last column contains user_id
-            item_name = requests[borrow_id - 1][1]  # Item name column
-            del requests[borrow_id - 1]
+            user_id = borrow_requests[borrow_id - 1][-1]  # Last column contains user_id
+            item_name = borrow_requests[borrow_id - 1][1]  # Item name column
+            
+            del borrow_requests[borrow_id - 1]  # Remove the selected request
             
             # Renumber remaining requests
-            for i in range(len(requests)):
-                requests[i][0] = str(i + 1)
+            for i, request in enumerate(borrow_requests, start=1):
+                request[0] = str(i)  
             
             # Write updated requests back to file
             with open(borrow_file, "w", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerows(requests)
+                writer.writerow(["Borrow ID", "Item", "From Date", "To Date", "User ID"])  # Keep header
+                for i, request in enumerate(borrow_requests, start=1):
+                    writer.writerow([i] + request[1:])  # Ensure IDs remain sequential
             
             # Update user borrow status in database
             cursor = connection.cursor()
@@ -191,18 +235,19 @@ def delete_borrow_request(db_name, connection):
             connection.commit()
             cursor.close()
 
-            # Log the deletion BEFORE printing success message
             log_transaction(db_name, None, "Deleted", item_name, user_id)
 
-            print("Borrow request deleted successfully and user borrow status updated.")
+            console.print("[green]Borrow request deleted successfully and user borrow status updated.[/green]")
     
     except FileNotFoundError:
-        print("No borrow requests found.")
+        console.print("[yellow]No borrow requests found.[/yellow]")
+    except ValueError:
+        console.print("[red]Invalid input. Please enter a valid Borrow ID.[/red]")
     except Exception as e:
-        print(f"Error: {e}")
+        console.print(f"[red]Error: {e}[/red]")
 
-def view_lended_items(db_name):
-    db_number = db_name.replace("lendborrow", "")  # Extract the number from db_name
+def view_lended_items(db_name, connection):
+    db_number = db_name.replace("lendborrow", "")  
     lended_items_file = f"lended_items{db_number}.csv"
     
     try:
@@ -211,91 +256,117 @@ def view_lended_items(db_name):
             items = list(reader)
             
             if not items:
-                print("No lended items found.")
+                console.print("[yellow]No lended items found.[/yellow]")
                 return
             
-            print("\nLended Items:")
-            for item in items:
-                print(", ".join(item))
-    except FileNotFoundError:
-        print("No lended items found.")
+            table = Table(title="Lended Items", show_lines=True)
+            table.add_column("ID", justify="center", style="cyan")
+            table.add_column("Item", style="bold")
+            table.add_column("Lender ID", justify="center", style="magenta")
+            table.add_column("Borrower ID", justify="center", style="magenta")
+            table.add_column("From Date", justify="center")
+            table.add_column("To Date", justify="center")
+            
+            # Skip header if it matches expected column names
+            if items and items[0] == ["Borrow ID", "Item", "From Date", "To Date", "Borrower ID", "Lender ID"]:
+                items = items[1:]  # Remove header row
 
-def view_transaction_history(db_name):
-    db_number = db_name.replace("lendborrow", "")  # Extract the number from db_name
-    transactions_file = f"transactions{db_number}.csv"
+            for item in items:
+                table.add_row(*item)
+
+            console.print(table)
+    except FileNotFoundError:
+        console.print("[yellow]No lended items found.[/yellow]")
+
+def view_transaction_history(db_name, connection):
+    db_number = db_name.replace("lendborrow", "")  
+    transactions_file = f"transactions{db_number}.txt"
     
     try:
         with open(transactions_file, "r", newline="") as file:
-            reader = csv.reader(file)
-            transactions = list(reader)
-            
-            if not transactions:
-                print("No transactions found.")
+            data = file.read().strip()
+            if not data:
+                console.print("[yellow]No transaction history found.[/yellow]")
                 return
             
-            print("\nTransaction History:")
-            for transaction in transactions:
-                print(", ".join(transaction))
+            console.print("\n[bold cyan]Transaction History:[/bold cyan]")
+            console.print(Text(data, style="dim"))
+            
     except FileNotFoundError:
-        print("No transaction history found.")
+        console.print("[yellow]No transaction history found.[/yellow]")
 
 def view_users_list(db_name, connection):
     try:
         cursor = connection.cursor()
-        cursor.execute("SELECT * FROM user")
+        cursor.execute("SELECT user_id, name, email FROM user")
         users = cursor.fetchall()
         cursor.close()
         
         if not users:
-            print("No users found.")
+            console.print("[yellow]No users found.[/yellow]")
             return
         
-        print("\nUser List:")
+        table = Table(title="User List", show_lines=True)
+        table.add_column("User ID", justify="center", style="cyan")
+        table.add_column("Name", style="bold")
+        table.add_column("Email", style="magenta")
+        
         for user in users:
-            print(user)  # Prints the full tuple directly
+            table.add_row(*map(str, user))
+        
+        console.print(table)
     
     except mysql.connector.Error as e:
-        print(f"Error retrieving users: {e}")
+        console.print(f"[red]Error retrieving users: {e}[/red]")
 
 def view_admins_list(db_name, connection):
     try:
         cursor = connection.cursor()
-        cursor.execute("SELECT * FROM admin")
+        cursor.execute("SELECT admin_id, admin_name, email FROM admin")
         admins = cursor.fetchall()
         cursor.close()
         
         if not admins:
-            print("No users found.")
+            console.print("[yellow]No admins found.[/yellow]")
             return
         
-        print("\nUser List:")
+        table = Table(title="Admin List", show_lines=True)
+        table.add_column("Admin ID", justify="center", style="cyan")
+        table.add_column("Name", style="bold")
+        table.add_column("Email", style="magenta")
+        
         for admin in admins:
-            print(admin)  # Prints the full tuple directly
+            table.add_row(*map(str, admin))
+        
+        console.print(table)
     
     except mysql.connector.Error as e:
-        print(f"Error retrieving users: {e}")
+        console.print(f"[red]Error retrieving admins: {e}[/red]")
 
 def put_borrow_request(db_name, connection, user_id):
     db_number = db_name.replace("lendborrow", "")  
     borrow_file = f"borrow{db_number}.csv"
 
-    item_name = input("Enter the item name: ")
-    from_date = input("Enter the borrowing start date (YYYY-MM-DD): ")
-    to_date = input("Enter the borrowing end date (YYYY-MM-DD): ")
+    item_name = Prompt.ask("[cyan]Enter the item name[/cyan]")
+    from_date = Prompt.ask("[cyan]Enter the borrowing start date (YYYY-MM-DD)[/cyan]")
+    to_date = Prompt.ask("[cyan]Enter the borrowing end date (YYYY-MM-DD)[/cyan]")
 
-    # Determine next Borrow ID
     next_borrow_id = 1  
     try:
         with open(borrow_file, "r", newline="") as file:
             reader = csv.reader(file)
             borrow_requests = list(reader)
+
+            if borrow_requests and borrow_requests[0][0].lower() == "borrow id":
+                borrow_requests = borrow_requests[1:]
+
             if borrow_requests:
                 last_id = int(borrow_requests[-1][0])
                 next_borrow_id = last_id + 1  
+
     except FileNotFoundError:
         pass  
 
-    # Update SQL user table
     try:
         cursor = connection.cursor()
         cursor.execute("""
@@ -306,27 +377,25 @@ def put_borrow_request(db_name, connection, user_id):
         connection.commit()
         cursor.close()
     except mysql.connector.Error as e:
-        print(f"Error updating borrow status: {e}")
+        console.print(f"[red]Error updating borrow status: {e}[/red]")
         return
 
-    # Add borrow request to CSV
     try:
         with open(borrow_file, "a", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([next_borrow_id, item_name, from_date, to_date, user_id])
-        print("Borrow request submitted successfully!")
+        console.print("[green]Borrow request submitted successfully![/green]")
 
-        # Log the transaction
         log_transaction(db_name, user_id, "requested", item_name)
 
     except Exception as e:
-        print(f"Error writing to borrow file: {e}")
+        console.print(f"[red]Error writing to borrow file: {e}[/red]")
 
 def accept_borrow_request(db_name, connection, lender_id):
     db_number = db_name.replace("lendborrow", "")  
     borrow_file = f"borrow{db_number}.csv"
+    lended_items_file = f"lended_items{db_number}.csv"
 
-    # Read and display existing borrow requests
     borrow_requests = []
     try:
         with open(borrow_file, "r", newline="") as file:
@@ -334,113 +403,126 @@ def accept_borrow_request(db_name, connection, lender_id):
             borrow_requests = list(reader)
 
         if not borrow_requests:
-            print("No borrow requests found.")
+            console.print("[yellow]No borrow requests found.[/yellow]")
             return
 
-        print("\nAvailable Borrow Requests:")
+        if borrow_requests[0][0].lower() == "borrow id":
+            borrow_requests = borrow_requests[1:]
+
+        table = Table(title="Available Borrow Requests", show_lines=True)
+        table.add_column("ID", justify="center", style="cyan")
+        table.add_column("Item", style="bold")
+        table.add_column("From Date", justify="center")
+        table.add_column("To Date", justify="center")
+        table.add_column("User ID", justify="center", style="magenta")
+
         for request in borrow_requests:
-            print(f"ID: {request[0]}, Item: {request[1]}, From: {request[2]}, To: {request[3]}, User ID: {request[4]}")
-        
+            table.add_row(*request)
+
+        console.print(table)
+
     except FileNotFoundError:
-        print("No borrow requests found.")
+        console.print("[yellow]No borrow requests found.[/yellow]")
         return
 
-    # Ask which request to accept
     try:
-        accept_id = int(input("Enter the Borrow Request ID to accept: ")) - 1
+        accept_id = int(Prompt.ask("[cyan]Enter the Borrow Request ID to accept[/cyan]")) - 1
         if accept_id < 0 or accept_id >= len(borrow_requests):
-            print("Invalid selection.")
+            console.print("[red]Invalid selection.[/red]")
             return
 
-        # Get the user ID and item from the request
         accepted_request = borrow_requests.pop(accept_id)
-        borrower_id = accepted_request[4]
+        
+        try:
+            borrower_id = int(accepted_request[4])  
+        except ValueError:
+            console.print("[red]Error: Borrower ID is not a valid number.[/red]")
+            return
+        
         borrowed_item = accepted_request[1]
+        from_date = accepted_request[2]
+        to_date = accepted_request[3]
 
-        # Update SQL tables
         try:
             cursor = connection.cursor()
-            
-            # Update borrower status to 'received'
-            cursor.execute("""
-                UPDATE user 
-                SET borrow_status = 'received'
-                WHERE user_id = %s
-            """, (borrower_id,))
-            
-            # Update lender status to 'accepted'
-            cursor.execute("""
-                UPDATE user 
-                SET lend_status = 'accepted', lended_item = %s
-                WHERE user_id = %s
-            """, (borrowed_item, lender_id))
-
+            cursor.execute("UPDATE user SET borrow_status = 'received' WHERE user_id = %s", (borrower_id,))
+            cursor.execute("UPDATE user SET lend_status = 'accepted', lended_item = %s WHERE user_id = %s", (borrowed_item, lender_id))
             connection.commit()
             cursor.close()
         except mysql.connector.Error as e:
-            print(f"Error updating user statuses: {e}")
+            console.print(f"[red]Error updating user statuses: {e}[/red]")
             return
 
-        # Renumber borrow requests and update the CSV
         try:
             with open(borrow_file, "w", newline="") as file:
                 writer = csv.writer(file)
+                writer.writerow(["Borrow ID", "Item", "From Date", "To Date", "User ID"])  # Keep header
                 for index, request in enumerate(borrow_requests, start=1):
-                    writer.writerow([index] + request[1:])  # Renumber IDs
+                    writer.writerow([index] + request[1:])
             
-            print("Borrow request accepted successfully!")
+            console.print("[green]Borrow request accepted successfully![/green]")
 
-            # Log the transaction
+            with open(lended_items_file, "a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow([accepted_request[0], borrowed_item, from_date, to_date, borrower_id, lender_id])
+
             log_transaction(db_name, borrower_id, "Accepted", borrowed_item, lender_id)
             log_transaction(db_name, lender_id, "Lent", borrowed_item, borrower_id)
 
         except Exception as e:
-            print(f"Error updating borrow file: {e}")
+            console.print(f"[red]Error updating files: {e}[/red]")
     
     except ValueError:
-        print("Invalid input. Please enter a valid Borrow Request ID.")
+        console.print("[red]Invalid input. Please enter a valid Borrow Request ID.[/red]")
 
-def cancel_borrow_request(db_name, connection, user_id):  # Uses user_id directly
+def cancel_borrow_request(db_name, connection, user_id):
     db_number = db_name.replace("lendborrow", "")  
     borrow_file = f"borrow{db_number}.csv"
 
-    # Read and display existing borrow requests
     borrow_requests = []
-    user_requests = []
-    
+    user_requests = {}
+
     try:
         with open(borrow_file, "r", newline="") as file:
             reader = csv.reader(file)
             borrow_requests = list(reader)
 
         if not borrow_requests:
-            print("No borrow requests found.")
+            console.print("[yellow]No borrow requests found.[/yellow]")
             return
 
-        # Filter borrow requests to show only those made by this user
-        print("\nYour Borrow Requests:")
-        for request in borrow_requests:
-            if request[4] == str(user_id):  # Match user_id as string
-                user_requests.append(request)
-                print(f"ID: {request[0]}, Item: {request[1]}, From: {request[2]}, To: {request[3]}")
+        table = Table(title="Your Borrow Requests", show_lines=True)
+        table.add_column("ID", justify="center", style="cyan")
+        table.add_column("Item", style="bold")
+        table.add_column("From Date", justify="center")
+        table.add_column("To Date", justify="center")
+
+        for request in borrow_requests[1:]:  # Skip header row
+            if request[4] == str(user_id):  
+                request_id = request[0]  
+                user_requests[request_id] = request
+                table.add_row(str(request_id), request[1], request[2], request[3])
 
         if not user_requests:
-            print("You have no active borrow requests.")
+            console.print("[yellow]You have no active borrow requests.[/yellow]")
             return
 
+        console.print(table)
+
     except FileNotFoundError:
-        print("No borrow requests found.")
+        console.print("[yellow]No borrow requests found.[/yellow]")
         return
 
     # Ask which request to cancel
     try:
-        cancel_id = int(input("Enter the Borrow Request ID to cancel: ")) - 1
-        if cancel_id < 0 or cancel_id >= len(borrow_requests):
-            print("Invalid selection.")
+        cancel_id = Prompt.ask("[cyan]Enter the Borrow Request ID to cancel[/cyan]")
+        if cancel_id not in user_requests:
+            console.print("[red]Invalid selection.[/red]")
             return
 
-        # Remove the request and get borrower ID
-        cancelled_request = borrow_requests.pop(cancel_id)
+        # Remove the request based on request ID (not list index)
+        cancelled_request = user_requests.pop(str(cancel_id))
+        borrow_requests = [req for req in borrow_requests if req[0] != str(cancel_id)]
 
         # Reset borrow status in SQL for this user
         try:
@@ -453,23 +535,25 @@ def cancel_borrow_request(db_name, connection, user_id):  # Uses user_id directl
             connection.commit()
             cursor.close()
         except mysql.connector.Error as e:
-            print(f"Error resetting borrow status: {e}")
+            console.print(f"[red]Error resetting borrow status: {e}[/red]")
             return
 
-        # Log the cancellation BEFORE updating the borrow file
+        # Log the cancellation
         log_transaction(db_name, user_id, "Cancelled", cancelled_request[1])
 
         # Renumber borrow requests and update the CSV
         try:
             with open(borrow_file, "w", newline="") as file:
                 writer = csv.writer(file)
-                for index, request in enumerate(borrow_requests, start=1):
-                    writer.writerow([index] + request[1:])  # Renumber IDs
-            
-            print("Borrow request cancelled successfully!")
+                writer.writerow(["Borrow ID", "Item", "From Date", "To Date", "User ID"])  # Write header once
+                for index, request in enumerate(borrow_requests[1:], start=1):
+                    writer.writerow([str(index)] + request[1:])  # Ensure ID remains as a string
+
+            console.print("[green]Borrow request cancelled successfully![/green]")
 
         except Exception as e:
-            print(f"Error updating borrow file: {e}")
+            console.print(f"[red]Error updating borrow file: {e}[/red]")
     
     except ValueError:
-        print("Invalid input. Please enter a valid Borrow Request ID.")
+        console.print("[red]Invalid input. Please enter a valid Borrow Request ID.[/red]")
+        
